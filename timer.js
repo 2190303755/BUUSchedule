@@ -3,16 +3,8 @@
  */
 async function scheduleTimer() {
     // 内嵌loadTool工具，传入工具名即可引用公共工具函数(暂未确定公共函数，后续会开放)
-    await loadTool('AIScheduleTools');
-    const {AIScheduleAlert} = AIScheduleTools();
     // 只要大声喊出 liuwenkiii yyds 就可以保你代码不出bug
     /* \ liuwenkiii yyds! / */
-    /* 支持异步操作 推荐await写法
-    const someAsyncFunc = () => new Promise(resolve => {
-      setTimeout(() => resolve(), 100)
-    })
-    await someAsyncFunc()*/
-    await AIScheduleAlert('解析成功!\n如有问题可联系Q 2190303755');
     // 返回时间配置JSON，所有项都为可选项，如果不进行时间配置，请返回空对象
     return {
         totalWeek: 18, // 总周数：[1, 30]之间的整数
