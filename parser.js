@@ -103,8 +103,11 @@ function scheduleHtmlParser(html) {
             const rawInfo = $(this).html().split('<br>').filter(identity);
             const length = rawInfo.length;
             if (length < 2) return;//空槽只有1行
-            for (let i = 0; i < length; i += 4) {//4行描述一节课
-                result.push(parseClass(rawInfo, i, index));
+            let i = 0;
+            while (++i < length) {
+                if (rawInfo[i].charAt(0) !== '周') continue;
+                result.push(parseClass(rawInfo, i - 1, index));
+                i += 3;//连续的4行描述一节课
             }
         });
     });
