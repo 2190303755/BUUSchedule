@@ -1,7 +1,7 @@
-const REGEX_TIME = /(\d+)[-,]?(\d*)/g;
+const REGEX_TIME = /(\d+)[-,]?(\d*)[节周]/g;
 const REGEX_SKIP = /\|[单双]周/;
 const TIME_TABLE = [
-    undefined,//索引从0开始
+    undefined, // 索引从0开始
     {"section": 1, "startTime": "08:00", "endTime": "08:45"},
     {"section": 2, "startTime": "08:50", "endTime": "09:35"},
     {"section": 3, "startTime": "09:55", "endTime": "10:40"},
@@ -26,8 +26,15 @@ const CHAR2DAY = {
     '日': 7
 };
 
-function identity(n) {
-    return n;
+/**
+ * 过滤掉奇数索引的项
+ */
+function biWeekly(_, i) {
+    return (i & 1) === 0;
+}
+
+function notBlank(str) {
+    return str?.replaceAll(/&nbsp;/g, '').trim();
 }
 
 function getSectionInfo(section) {
@@ -49,67 +56,90 @@ function parseTimeRanges(rawTime) {
     return result;
 }
 
-function parseClass(rawInfo, index, defaultSection) {
+function parseClass(info, index, fallback) {
     let weeks;
     let sections;
-    const rawTime = rawInfo[index + 1];
-    const ranges = parseTimeRanges(rawTime);
+    const time = info[index + 1];
+    const ranges = parseTimeRanges(
+        time.replaceAll(/节\/周/g, '') // fallback的duration有时长了
+    );
     switch (ranges.length) {
-        case 1://似乎不应该出现，但防一手节数已知时的省略
-            sections = [TIME_TABLE[defaultSection]];
+        case 1:
             weeks = ranges[0];
+            sections = [];
+            for (let i = 0; i < fallback.duration; ++i) {
+                sections.push(fallback.section + i);
+            }
             break;
-        case 2://这才对嘛
-            sections = ranges[0].map(getSectionInfo);
+        case 2:
             weeks = ranges[1];
+            sections = ranges[0];
             break;
         default:
-            throw SyntaxError(`Wrong Format: ${rawTime}, ${ranges}`);
+            throw SyntaxError(`Wrong Format: ${time}, ${ranges}`);
     }
     return {
-        name: rawInfo[index],
-        weeks: REGEX_SKIP.test(rawTime)
-            ? weeks.filter((_, i) => (i & 1) === 0)//把奇数索引的项过滤掉
-            : weeks,
-        teacher: rawInfo[index + 2],
-        position: rawInfo[index + 3],
-        day: CHAR2DAY[rawTime.charAt(1)],
-        sections: sections
+        name: info[index],
+        weeks: REGEX_SKIP.test(time) ? weeks.filter(biWeekly) : weeks,
+        teacher: info[index + 2],
+        position: info[index + 3],
+        day: time.startsWith('周') ? CHAR2DAY[time.charAt(1)] ?? fallback.day : fallback.day,
+        sections: sections.map(getSectionInfo)
     };
 }
 
+/**
+ * 除函数名外都可编辑
+ * 传入的参数为scheduleHtmlProvider函数获取到的html
+ * 可使用正则匹配
+ * 可使用解析dom匹配，工具内置了$，跟jquery使用方法一样，直接用就可以了，参考：https://juejin.im/post/5ea131f76fb9a03c8122d6b9
+ */
 function scheduleHtmlParser(html) {
-    //除函数名外都可编辑
-    //传入的参数为上一步函数获取到的html
-    //可使用正则匹配
-    //可使用解析dom匹配，工具内置了$，跟jquery使用方法一样，直接用就可以了，参考：https://juejin.im/post/5ea131f76fb9a03c8122d6b9
-    //以下为示例，您可以完全重写或在此基础上更改
     const $ = cheerio.load(html, {decodeEntities: false});
-    const result = [];
+    const classes = [];
+    const table = Array.from({length: 8}, () => [])
     $('tr').each(function (index) {
-        //第一行是星期几，第二行是早晨；自减后恰好表示第几节课
+        // 第一行是星期几，第二行是早晨；自减后恰好表示第几节课
         if (--index < 1) return true;
+        let day = 0;
         $(this).children('td').each(function (column) {
             switch (index) {
-                case 1://早
-                case 6://午
-                case 10://晚
-                    if (--column < 1) return true;//span特有的错位；有一列表示第几节
+                case 1: // 早
+                case 6: // 午
+                case 10: // 晚
+                    if (--column < 1) return true; // span特有的错位；有一列表示第几节
                     break;
                 default:
-                    if (column < 1) return true;//有一列表示第几节
+                    if (column < 1) return true; // 有一列表示第几节
             }
-            //span产生的错位导致column不一定表示周几
-            const rawInfo = $(this).html().split('<br>').filter(identity);
-            const length = rawInfo.length;
-            if (length < 2) return;//空槽只有1行
-            let i = 0;
-            while (++i < length) {
-                if (rawInfo[i].charAt(0) !== '周') continue;
-                result.push(parseClass(rawInfo, i - 1, index));
-                i += 3;//连续的4行描述一节课
+            let sections;
+            do {
+                sections = table[++day];
+            } while (sections[index]); // 问就是span干的
+            const self = $(this);
+            const span = self.attr('rowspan');
+            const clazz = {
+                day: day,
+                section: index,
+                duration: span ? parseInt(span, 10) : 1,
+                info: self.html().split('<br>').filter(notBlank),
+            };
+            for (let i = 0; i < clazz.duration; ++i) {
+                sections[index + i] = clazz;
             }
+            if (clazz.info.length) {
+                classes.push(clazz);
+            }
+            return true;
         });
+        return true;
     });
-    return result;
+    return classes.flatMap(clazz => {
+        const sections = [];
+        const info = clazz.info;
+        for (let index = 0; index < info.length; index += 4) {
+            sections.push(parseClass(info, index, clazz));
+        }
+        return sections;
+    });
 }
